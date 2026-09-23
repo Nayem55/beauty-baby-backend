@@ -1,0 +1,24 @@
+import { z } from 'zod';
+const text = (max=500) => z.string().trim().max(max);
+const name = text(160).min(1,'This field is required');
+export const email = z.email().trim().toLowerCase().max(250);
+export const password = z.string().min(10,'Use at least 10 characters').max(128);
+export const phone = z.string().trim().regex(/^(?:\+?88)?01[3-9]\d{8}$/,'Enter a valid Bangladesh mobile number');
+export const url = text(2000).refine(s=>!s || /^https?:\/\/[^\s]+$/i.test(s) || /^\/(?!\/)[^\s\\]*$/.test(s),'Use an https URL or a path starting with /');
+const num = z.coerce.number().finite().min(0).max(10000000);
+const integer = num.int();
+const active = z.boolean().default(true);
+const variant = z.object({id:name,name,sku:name,price:num,stock:integer});
+export const productSchema = z.object({ name,slug:name.regex(/^[a-z0-9-]+$/),sku:name,description:text(10000).default(''),ingredients:text(5000).default(''),usage:text(5000).default(''),price:num,comparePrice:num.default(0),stock:integer,lowStock:integer.default(5),categoryId:text(100).default(''),subcategoryId:text(100).default(''),brandId:text(100).default(''),tag:z.enum(['Best Seller','New','Sale','']).default(''),type:z.enum(['bottle','tube','jar','oil','toy','gift']).default('bottle'),images:z.array(url).max(12).default([]),active,featured:z.boolean().default(false),giftEligible:z.boolean().default(false),variants:z.array(variant).max(60).default([]),seoTitle:text(160).default(''),seoDescription:text(320).default('') }).superRefine((p,ctx)=>{if(new Set(p.variants.map(v=>v.id)).size!==p.variants.length||new Set(p.variants.map(v=>v.sku)).size!==p.variants.length) ctx.addIssue({code:'custom',message:'Variant identifiers and SKUs must be unique'});});
+export const schemas={
+products:productSchema,
+categories:z.object({name,slug:name.regex(/^[a-z0-9-]+$/),description:text(500).default(''),parentId:text(100).default(''),image:url.default(''),style:z.enum(['baby','toys','beauty','gifts']).default('baby'),order:integer.default(0),active}),
+brands:z.object({name,slug:name.regex(/^[a-z0-9-]+$/),description:text(1000).default(''),image:url.default(''),active}),
+banners:z.object({title:name,subtitle:text(500).default(''),image:url,link:url.default('/shop'),order:integer.default(0),active}),
+pages:z.object({title:name,slug:name.regex(/^[a-z0-9-]+$/),content:text(50000),active}),
+coupons:z.object({code:name.toUpperCase().regex(/^[A-Z0-9_-]+$/),type:z.enum(['percent','fixed']),value:num,minOrder:num.default(0),maxDiscount:num.default(0),usageLimit:integer.default(0),expiresAt:text(30).refine(s=>!s || !Number.isNaN(Date.parse(s)),'Invalid expiry date').default(''),active}).refine(c=>c.type!=='percent'||c.value<=100,'Percentage cannot exceed 100'),
+};
+export const settingsSchema=z.object({brandName:name,logo:url,announcement:text(500),email:z.union([email,z.literal('')]),phone:text(40),address:text(1000),insideDhaka:num,outsideDhaka:num,freeShippingMin:num,codEnabled:z.boolean(),bkashEnabled:z.boolean(),bkashNumber:text(40),nagadEnabled:z.boolean(),nagadNumber:text(40),paymentInstructions:text(2000),heroEyebrow:text(160),heroTitle:text(160),heroAccent:text(160),heroDescription:text(1000),storyTitle:text(200),storyDescription:text(2000),categoryDescription:text(1000),productDescription:text(1000),communityDescription:text(1000),footerDescription:text(1000),instagram:url,facebook:url,tiktok:url,pinterest:url,showCommunity:z.boolean(),showBundles:z.boolean(),primaryColor:z.string().regex(/^#[0-9a-f]{6}$/i),navLinks:z.array(z.object({label:name,url})).max(12),communityItems:z.array(z.object({emoji:text(20),label:text(80),image:url})).max(10)}).superRefine((s,ctx)=>{if(!s.codEnabled&&!s.bkashEnabled&&!s.nagadEnabled)ctx.addIssue({code:'custom',message:'Enable at least one payment method'});if(s.bkashEnabled&&!phone.safeParse(s.bkashNumber).success)ctx.addIssue({code:'custom',message:'A valid bKash receiving number is required'});if(s.nagadEnabled&&!phone.safeParse(s.nagadNumber).success)ctx.addIssue({code:'custom',message:'A valid Nagad receiving number is required'});});
+export const cartSchema=z.object({items:z.array(z.object({productId:name,variantId:text(100).default(''),quantity:z.number().int().min(1).max(99)})).min(1).max(100),couponCode:text(80).default(''),zone:z.enum(['dhaka','outside']).default('dhaka')});
+export const orderSchema=cartSchema.extend({customer:z.object({name,phone,email:z.union([email,z.literal('')]).default(''),address:text(1000).min(8),city:name,notes:text(2000).default('')}),paymentMethod:z.enum(['cod','bkash','nagad']),transactionId:text(100).default(''),senderPhone:text(40).default('')});
+export function fail(message,status=400) { throw Object.assign(new Error(message),{status}); }

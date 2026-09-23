@@ -1,0 +1,74 @@
+[
+  {
+    "id": 1,
+    "name": "Gentle Baby Wash",
+    "price": 1200,
+    "rating": "4.9",
+    "tag": "Best Seller",
+    "type": "bottle",
+    "desc": "A soft, tear-free daily wash with a comforting, creamy feel for delicate skin."
+  },
+  {
+    "id": 2,
+    "name": "Diaper Rash Cream",
+    "price": 980,
+    "rating": "4.8",
+    "tag": "Best Seller",
+    "type": "tube",
+    "desc": "A gentle barrier cream made for everyday comfort and quick, mess-free application."
+  },
+  {
+    "id": 3,
+    "name": "Baby Moisturizing Cream",
+    "price": 1350,
+    "rating": "4.9",
+    "tag": "Best Seller",
+    "type": "jar",
+    "desc": "A rich-but-light moisturizer that leaves baby skin soft, calm and cuddly."
+  },
+  {
+    "id": 4,
+    "name": "Soothing Baby Oil",
+    "price": 990,
+    "rating": "4.8",
+    "tag": "Best Seller",
+    "type": "oil",
+    "desc": "A silky massage oil for bedtime rituals, bonding moments and a soft after-glow."
+  },
+  {
+    "id": 5,
+    "name": "Lavender Bath Cloud",
+    "price": 1490,
+    "rating": "4.7",
+    "tag": "New",
+    "type": "jar",
+    "desc": "A dreamy bath-time cream with a soft lavender-inspired ritual and plush texture."
+  },
+  {
+    "id": 6,
+    "name": "Little Glow Lotion",
+    "price": 1150,
+    "rating": "4.8",
+    "tag": "New",
+    "type": "bottle",
+    "desc": "Everyday hydration in a cheerful little bottle made to live beautifully on the shelf."
+  },
+  {
+    "id": 7,
+    "name": "Care Duo Set",
+    "price": 1890,
+    "rating": "4.9",
+    "tag": "Sale",
+    "type": "tube",
+    "desc": "Two daily-care essentials paired together in an easy, giftable set."
+  },
+  {
+    "id": 8,
+    "name": "Bedtime Ritual Oil",
+    "price": 850,
+    "rating": "4.7",
+    "tag": "Sale",
+    "type": "oil",
+    "desc": "A compact evening-care favorite for soothing massage and cozy bedtime routines."
+  }
+]

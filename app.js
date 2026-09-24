@@ -2,20 +2,28 @@ import express from 'express';
 import helmet from 'helmet';
 import multer from 'multer';
 import sharp from 'sharp';
+import { v2 as cloudinary } from 'cloudinary';
 import path from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import { z } from 'zod';
+import crypto from 'node:crypto';
 import { all, get, put, remove, transaction, db, uid, audit, settings } from './db.js';
 import { seed } from './seed.js';
 import { identify, requireUser, requireAdmin, ownerOnly, limit, hashPassword, verifyPassword, session, publicUser } from './auth.js';
 import { schemas, settingsSchema, email, password, phone, cartSchema, orderSchema, fail } from './validation.js';
 import { quote, createOrder, updateOrder, allowedTransitions } from './commerce.js';
+import { sendOrderConfirmation } from './email.js';
 
 seed();
 export const app=express();
+const emailKey=crypto.createHash('sha256').update(process.env.JWT_SECRET||'beauty-baby-email-settings-key').digest();
+const encryptEmailSecret=value=>{if(!value)return '';const iv=crypto.randomBytes(12);const cipher=crypto.createCipheriv('aes-256-gcm',emailKey,iv);const encrypted=Buffer.concat([cipher.update(String(value),'utf8'),cipher.final()]);return `enc:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${encrypted.toString('base64')}`;};
+const decryptEmailSecret=value=>{if(!value)return process.env.GMAIL_APP_PASSWORD||process.env.SMTP_PASSWORD||'';if(!String(value).startsWith('enc:'))return String(value);try{const[,iv,tag,data]=String(value).split(':');const decipher=crypto.createDecipheriv('aes-256-gcm',emailKey,Buffer.from(iv,'base64'));decipher.setAuthTag(Buffer.from(tag,'base64'));return Buffer.concat([decipher.update(Buffer.from(data,'base64')),decipher.final()]).toString('utf8');}catch{return '';}};
+const publicStoreSettings=()=>{const value={...settings()};if(value.emailSettings){value.emailSettings={...value.emailSettings,credentialsConfigured:Boolean(value.emailSettings.smtpUser||value.emailSettings.smtpPassword)};delete value.emailSettings.smtpUser;delete value.emailSettings.smtpPassword;}return value;};
+const adminStoreSettings=()=>{const value={...settings()};const emailSettings=value.emailSettings||{};value.emailSettings={...emailSettings,smtpUser:emailSettings.smtpUser||process.env.GMAIL_USER||process.env.SMTP_USER||'',smtpPassword:decryptEmailSecret(emailSettings.smtpPassword),credentialsConfigured:Boolean(emailSettings.smtpPassword||process.env.GMAIL_APP_PASSWORD||process.env.SMTP_PASSWORD)};return value;};
 const uploads=path.resolve(process.env.UPLOAD_DIR||'uploads'); mkdirSync(uploads,{recursive:true});
 app.disable('x-powered-by');
-app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'"],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'data:','https:','http:'],connectSrc:["'self'"],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
+app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'",'https://www.googletagmanager.com','https://connect.facebook.net'],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'data:','https:','http:'],connectSrc:["'self'",'https://www.google-analytics.com','https://analytics.google.com','https://www.facebook.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
 app.use((req,res,next)=>{const origin=req.headers.origin;const allowed=process.env.NODE_ENV!=='production'||!origin||origin===(process.env.APP_ORIGIN||'http://localhost:1008');if(origin&&allowed){res.set('Access-Control-Allow-Origin',origin);res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key');res.set('Access-Control-Allow-Methods','GET,POST,PUT,PATCH,DELETE,OPTIONS');}if(req.method==='OPTIONS')return res.sendStatus(204);next();});
 app.use(express.json({limit:'2mb'}));
 app.use('/api',(req,res,next)=>{
@@ -30,7 +38,7 @@ app.use('/api',(req,res,next)=>{
 app.use('/api',identify);
 app.get('/api/health',(req,res)=>res.json({status:'ok',store:'Beauty & baby',database:'connected'}));
 const safeProduct=p=>{const reviews=all('reviews').filter(r=>r.productId===p.id&&r.approved);return {...p,rating:reviews.length?Number((reviews.reduce((s,r)=>s+r.rating,0)/reviews.length).toFixed(1)):null,reviewCount:reviews.length};};
-app.get('/api/store',(req,res)=>res.json({settings:settings(),categories:all('categories').filter(c=>c.active).sort((a,b)=>a.order-b.order),brands:all('brands').filter(b=>b.active),banners:all('banners').filter(b=>b.active).sort((a,b)=>a.order-b.order),pages:all('pages').filter(p=>p.active).map(({id,title,slug})=>({id,title,slug}))}));
+app.get('/api/store',(req,res)=>res.json({settings:publicStoreSettings(),categories:all('categories').filter(c=>c.active).sort((a,b)=>a.order-b.order),brands:all('brands').filter(b=>b.active),banners:all('banners').filter(b=>b.active).sort((a,b)=>a.order-b.order),pages:all('pages').filter(p=>p.active).map(({id,title,slug})=>({id,title,slug}))}));
 app.get('/api/products',(req,res)=>{
  let products=all('products').filter(p=>p.active).reverse(); const {q,category,brand,tag,sort,min,max}=req.query;
  if(q)products=products.filter(p=>(p.name+' '+p.description+' '+p.sku).toLowerCase().includes(String(q).toLowerCase()));
@@ -53,7 +61,7 @@ app.get('/api/account/orders',requireUser,(req,res)=>res.json({orders:all('order
 app.get('/api/account/wishlist',requireUser,(req,res)=>res.json({ids:get('wishlists',req.user.id)?.ids||[]}));
 app.put('/api/account/wishlist',requireUser,(req,res)=>{const {ids}=z.object({ids:z.array(z.string().max(100)).max(300)}).parse(req.body);put('wishlists',{id:req.user.id,ids:[...new Set(ids)]});res.json({success:true});});
 app.post('/api/checkout/quote',(req,res)=>res.json(quote(cartSchema.parse(req.body))));
-app.post('/api/orders',limit('orders',30),(req,res)=>{const key=z.string().uuid().parse(req.headers['idempotency-key']);res.status(201).json({order:customerOrder(createOrder(orderSchema.parse(req.body),req.user,key))});});
+app.post('/api/orders',limit('orders',30),(req,res)=>{const key=z.string().uuid().parse(req.headers['idempotency-key']);const order=createOrder(orderSchema.parse(req.body),req.user,key);sendOrderConfirmation(order,settings()).catch(error=>console.error('[Email] Beauty & baby confirmation failed:',error.message));res.status(201).json({order:customerOrder(order)});});
 function customerOrder(o){const {adminNotes,userId,couponId,...safe}=o;return safe;}
 app.post('/api/orders/track',limit('track',40),(req,res)=>{const v=z.object({reference:z.string().trim().max(40),phone}).parse(req.body);const normalize=p=>p.replace(/^\+?88/,'');const o=all('orders').find(o=>o.reference===v.reference.toUpperCase()&&normalize(o.customer.phone)===normalize(v.phone));if(!o)fail('No order matches that reference and mobile number.',404);res.json({order:{reference:o.reference,status:o.status,paymentStatus:o.paymentStatus,courier:o.courier,trackingNumber:o.trackingNumber,createdAt:o.createdAt,total:o.total,items:o.items,history:o.history}});});
 app.post('/api/products/:id/reviews',requireUser,limit('reviews',10),(req,res)=>{const v=z.object({rating:z.number().int().min(1).max(5),comment:z.string().trim().min(10).max(2000)}).parse(req.body);if(!get('products',req.params.id)?.active)fail('Product not found.',404);if(!all('orders').some(o=>o.userId===req.user.id&&o.status==='delivered'&&o.items.some(i=>i.productId===req.params.id)))fail('Reviews are available after your purchase has been delivered.',403);if(all('reviews').some(r=>r.userId===req.user.id&&r.productId===req.params.id))fail('You have already reviewed this product.');put('reviews',{...v,productId:req.params.id,userId:req.user.id,name:req.user.name,approved:false});res.status(201).json({success:true});});
@@ -76,13 +84,13 @@ admin.delete('/reviews/:id',(req,res)=>{remove('reviews',req.params.id);audit(re
 admin.get('/newsletter',(req,res)=>res.json({items:all('newsletter')}));
 admin.delete('/newsletter/:id',(req,res)=>{remove('newsletter',req.params.id);audit(req.user,'subscriber.deleted',req.params.id);res.json({success:true});});
 admin.get('/audit',ownerOnly,(req,res)=>res.json({items:all('audit').slice(0,500)}));
-admin.get('/settings',(req,res)=>res.json({settings:settings()}));
-admin.put('/settings',ownerOnly,(req,res)=>{const v=settingsSchema.parse(req.body);const result=put('settings',{...v,id:'store'});audit(req.user,'settings.updated','Store configuration');res.json({settings:result});});
+admin.get('/settings',(req,res)=>res.json({settings:adminStoreSettings()}));
+admin.put('/settings',ownerOnly,(req,res)=>{const v=settingsSchema.parse(req.body);const previous=settings();const emailSettings={...v.emailSettings,smtpUser:v.emailSettings.smtpUser||previous?.emailSettings?.smtpUser||'',smtpPassword:v.emailSettings.smtpPassword?encryptEmailSecret(v.emailSettings.smtpPassword):(previous?.emailSettings?.smtpPassword||'')};put('settings',{...v,emailSettings,id:'store'});audit(req.user,'settings.updated','Store configuration');res.json({settings:adminStoreSettings()});});
 admin.get('/staff',ownerOnly,(req,res)=>res.json({items:all('users').filter(u=>u.role!=='customer').map(u=>({...publicUser(u),active:u.active}))}));
 admin.post('/staff',ownerOnly,(req,res)=>{const v=z.object({name:z.string().trim().min(2).max(120),email,password,role:z.enum(['manager','fulfillment'])}).parse(req.body);if(all('users').some(u=>u.email===v.email))fail('Email already in use.');const u=put('users',{...v,password:hashPassword(v.password),active:true});audit(req.user,'staff.created',u.email);res.status(201).json({item:publicUser(u)});});
 admin.patch('/staff/:id',ownerOnly,(req,res)=>{const u=get('users',req.params.id);if(!u||u.role==='customer'||u.role==='owner')fail('This account cannot be modified.');const v=z.object({active:z.boolean(),role:z.enum(['manager','fulfillment'])}).parse(req.body);put('users',{...u,...v});db.prepare('DELETE FROM sessions WHERE user_id=?').run(u.id);audit(req.user,'staff.updated',u.email);res.json({success:true});});
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1}});
-admin.post('/upload',upload.single('file'),async(req,res)=>{if(!req.file)fail('Choose an image.');let output;try{output=await sharp(req.file.buffer,{limitInputPixels:40e6}).rotate().resize(2000,2000,{fit:'inside',withoutEnlargement:true}).webp({quality:85}).toBuffer();}catch{fail('Upload a valid PNG, JPEG, GIF or WebP image under 8 MB.');}const name=uid()+'.webp';const {writeFile}=await import('node:fs/promises');await writeFile(path.join(uploads,name),output);audit(req.user,'image.uploaded',name);res.status(201).json({url:'/uploads/'+name});});
+admin.post('/upload',upload.single('file'),async(req,res)=>{if(!req.file)fail('Choose an image.');let output;try{output=await sharp(req.file.buffer,{limitInputPixels:40e6}).rotate().resize(2000,2000,{fit:'inside',withoutEnlargement:true}).webp({quality:85}).toBuffer();}catch{fail('Upload a valid PNG, JPEG, GIF or WebP image under 8 MB.');}const integration=settings()?.integrations?.cloudinary||{};const cloudName=integration.cloudName||process.env.CLOUDINARY_CLOUD_NAME;const configured=integration.enabled&&cloudName&&process.env.CLOUDINARY_API_KEY&&process.env.CLOUDINARY_API_SECRET&&cloudName!=='demo';if(configured){cloudinary.config({cloud_name:cloudName,api_key:process.env.CLOUDINARY_API_KEY,api_secret:process.env.CLOUDINARY_API_SECRET});const options={folder:integration.folder||'beauty-baby',resource_type:'image'};if(integration.uploadPreset)options.upload_preset=integration.uploadPreset;const result=await new Promise((resolve,reject)=>{const stream=cloudinary.uploader.upload_stream(options,(error,value)=>error?reject(error):resolve(value));stream.end(output);});audit(req.user,'image.uploaded',result.public_id);return res.status(201).json({url:result.secure_url,publicId:result.public_id});}const name=uid()+'.webp';const {writeFile}=await import('node:fs/promises');await writeFile(path.join(uploads,name),output);audit(req.user,'image.uploaded',name);res.status(201).json({url:'/uploads/'+name});});
 function validateReferences(kind,v,id) {
  if(['categories','brands','pages'].includes(kind)&&all(kind).some(r=>r.id!==id&&r.slug===v.slug))fail('This URL slug is already in use.');
  if(kind==='categories'&&v.parentId){const parent=get('categories',v.parentId);if(!parent||parent.parentId||v.parentId===id)fail('Choose a top-level parent category.');if(all('categories').some(c=>c.parentId===id))fail('A category with children cannot become a subcategory.');}

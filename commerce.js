@@ -1,4 +1,4 @@
-import { all, get, put, settings, transaction, audit, db } from './db.js';
+import { all, get, put, settings, transaction, audit, getIdempotency, putIdempotency } from './db.js';
 import { fail } from './validation.js';
 import { randomBytes, createHash } from 'node:crypto';
 export const round=n=>Math.round((n+Number.EPSILON)*100)/100;
@@ -21,15 +21,15 @@ export function quote(input) {
 export function createOrder(input,user,key) {
  return transaction(()=>{
  const fingerprint=createHash('sha256').update(JSON.stringify({input,userId:user?.id||null})).digest('hex');
- const previous=db.prepare('SELECT * FROM idempotency WHERE key=?').get(key);
- if(previous){if(previous.fingerprint!==fingerprint)fail('This checkout request has changed. Please submit again.',409);return get('orders',previous.order_id);}
+ const previous=getIdempotency(key);
+ if(previous){if(previous.fingerprint!==fingerprint)fail('This checkout request has changed. Please submit again.',409);return get('orders',previous.orderId);}
  const s=settings(); if(!s[input.paymentMethod+'Enabled'])fail('This payment method is not available.');
  if(input.paymentMethod!=='cod'){if(!/^[a-zA-Z0-9]{6,40}$/.test(input.transactionId)||!/^(?:\+?88)?01[3-9]\d{8}$/.test(input.senderPhone))fail('Enter your transaction ID and a valid sender mobile number.');if(all('orders').some(o=>o.paymentMethod===input.paymentMethod&&o.transactionId.toUpperCase()===input.transactionId.toUpperCase()))fail('This payment transaction has already been submitted.',409);}
  const q=quote(input);
  for(const item of q.items){const p=get('products',item.productId);if(item.variantId)p.variants=p.variants.map(v=>v.id===item.variantId?{...v,stock:v.stock-item.quantity}:v);else p.stock-=item.quantity;put('products',p);}
  if(q.couponId){const c=get('coupons',q.couponId);put('coupons',{...c,usedCount:(c.usedCount||0)+1});}
  const order=put('orders',{...q,reference:'BB-'+randomBytes(5).toString('hex').toUpperCase(),customer:input.customer,userId:user?.id||null,paymentMethod:input.paymentMethod,transactionId:input.transactionId,senderPhone:input.senderPhone,paymentStatus:input.paymentMethod==='cod'?'unpaid':'pending_verification',status:'pending',trackingNumber:'',courier:'',adminNotes:'',history:[{status:'pending',at:new Date().toISOString(),note:'Order placed'}]});
- db.prepare('INSERT INTO idempotency VALUES(?,?,?)').run(key,fingerprint,order.id);
+ putIdempotency(key,fingerprint,order.id);
  audit(user,'order.created',order.reference);return order;
  });
 }

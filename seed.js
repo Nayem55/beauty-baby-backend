@@ -9,7 +9,7 @@ export function seed() {
   const password=process.env.ADMIN_PASSWORD||randomBytes(18).toString('base64url');
   if(password.length<8) throw new Error('ADMIN_PASSWORD must contain at least 8 characters.');
   const email=(process.env.ADMIN_EMAIL||'admin@beautyandbaby.local').trim().toLowerCase();
-  put('users',{name:'Store owner',email,password:hashPassword(password),role:'owner',active:true});
+  put('users',{name:'Store owner',email,password:hashPassword(password),role:'admin',active:true});
   if(!process.env.ADMIN_PASSWORD) { const dest=path.join(path.dirname(databasePath),'admin-credentials.txt'); writeFileSync(dest,`Beauty & baby local admin\nEmail: ${email}\nPassword: ${password}\nSign in at /admin. Change this password in Settings > Security.\n`,{mode:0o600}); console.log(`Initial admin credentials saved to ${dest}`); }
  }
  const existingSettings=get('settings','store');

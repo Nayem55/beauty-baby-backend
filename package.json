@@ -10,6 +10,7 @@
     "dev": "node --env-file-if-exists=.env --watch index.js",
     "start": "node --env-file-if-exists=.env index.js",
     "admin:reset": "node --env-file-if-exists=.env scripts/reset-admin.js",
+    "catalog:replace-demo": "node --env-file-if-exists=.env scripts/replace-demo-catalog.js",
     "backup": "node --env-file-if-exists=.env scripts/backup.js"
   },
   "dependencies": {

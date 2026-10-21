@@ -4,14 +4,14 @@ import { randomBytes, createHash } from 'node:crypto';
 export const round=n=>Math.round((n+Number.EPSILON)*100)/100;
 export function quote(input) {
  const combined=new Map();
- for(const item of input.items) { const key=item.productId+':'+item.variantId; const prev=combined.get(key); combined.set(key,{...item,quantity:item.quantity+(prev?.quantity||0)}); }
+ for(const item of input.items) { const key=item.productId+':'+item.variantId+':'+item.selectedImage; const prev=combined.get(key); combined.set(key,{...item,quantity:item.quantity+(prev?.quantity||0)}); }
  const items=[...combined.values()].map(item=>{
   const p=get('products',item.productId); if(!p?.active)fail('An item in your bag is no longer available.');
   const v=p.variants.find(v=>v.id===item.variantId);
   if(p.variants.length&&!v)fail(`Please choose an option for ${p.name}.`);
   if(!p.variants.length&&item.variantId)fail(`The selected option for ${p.name} is unavailable.`);
   if(item.quantity>99||item.quantity>(v?.stock??p.stock))fail(`Only ${v?.stock??p.stock} of ${p.name}${v?' — '+v.name:''} are available.`,409);
-  return {...item,name:p.name,variantName:v?.name||'',sku:v?.sku||p.sku,price:v?.price??p.price,image:p.images[0]||'',type:p.type};
+  const image=item.selectedImage||p.images[0]||''; if(image&&!p.images.includes(image))fail(`The selected image for ${p.name} is unavailable.`); return {...item,name:p.name,variantName:v?.name||'',sku:v?.sku||p.sku,price:v?.price??p.price,image,type:p.type};
  });
  const subtotal=round(items.reduce((s,i)=>s+i.price*i.quantity,0)); let discount=0,coupon=null;
  if(input.couponCode){coupon=all('coupons').find(c=>c.code===input.couponCode.toUpperCase().trim()&&c.active);if(!coupon || (coupon.expiresAt&&Date.parse(coupon.expiresAt)<Date.now()) || (coupon.usageLimit && (coupon.usedCount||0)>=coupon.usageLimit))fail('This coupon is invalid, expired or fully redeemed.');if(subtotal<coupon.minOrder)fail(`This coupon requires a subtotal of ৳${coupon.minOrder}.`);discount=coupon.type==='percent'?subtotal*coupon.value/100:coupon.value;if(coupon.maxDiscount)discount=Math.min(discount,coupon.maxDiscount);discount=round(Math.min(discount,subtotal));}

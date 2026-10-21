@@ -33,12 +33,13 @@ const adminStoreSettings=()=>{const value=hideCloudinaryCredentials({...settings
 const uploads=path.resolve(process.env.UPLOAD_DIR||'uploads'); mkdirSync(uploads,{recursive:true});
 app.disable('x-powered-by');
 app.use(helmet({contentSecurityPolicy:{directives:{defaultSrc:["'self'"],scriptSrc:["'self'",'https://www.googletagmanager.com','https://connect.facebook.net'],styleSrc:["'self'","'unsafe-inline'"],imgSrc:["'self'",'data:','https:','http:'],connectSrc:["'self'",'https://www.google-analytics.com','https://analytics.google.com','https://www.facebook.com'],upgradeInsecureRequests:process.env.NODE_ENV==='production'?[]:null}},crossOriginEmbedderPolicy:false}));
-app.use((req,res,next)=>{const origin=req.headers.origin;const allowed=process.env.NODE_ENV!=='production'||!origin||origin===(process.env.APP_ORIGIN||'http://localhost:1008');if(origin&&allowed){res.set('Access-Control-Allow-Origin',origin);res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key');res.set('Access-Control-Allow-Methods','GET,POST,PUT,PATCH,DELETE,OPTIONS');}if(req.method==='OPTIONS')return res.sendStatus(204);next();});
+const allowedOrigins=()=>new Set((process.env.APP_ORIGINS||process.env.APP_ORIGIN||'http://localhost:1008').split(',').map(origin=>origin.trim()).filter(Boolean));
+app.use((req,res,next)=>{const origin=req.headers.origin;const allowed=process.env.NODE_ENV!=='production'||!origin||allowedOrigins().has(origin);if(origin&&allowed){res.set('Access-Control-Allow-Origin',origin);res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Headers','Content-Type, Idempotency-Key');res.set('Access-Control-Allow-Methods','GET,POST,PUT,PATCH,DELETE,OPTIONS');res.vary('Origin');}if(req.method==='OPTIONS')return res.sendStatus(204);next();});
 app.use(express.json({limit:'2mb'}));
 app.use('/api',(req,res,next)=>{
  res.set('Cache-Control','no-store');
  if(!['GET','HEAD','OPTIONS'].includes(req.method)) {
-  const origin=req.headers.origin; const allowed=new Set([process.env.APP_ORIGIN||'http://localhost:1008']);
+  const origin=req.headers.origin; const allowed=allowedOrigins();
   if(process.env.NODE_ENV!=='production') ['http://127.0.0.1:1008','http://localhost:1009','http://127.0.0.1:1009'].forEach(x=>allowed.add(x));
   if(process.env.NODE_ENV==='production' && ((origin&&!allowed.has(origin))||req.headers['sec-fetch-site']==='cross-site'))return res.status(403).json({error:'Request origin is not allowed.'});
  }
